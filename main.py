@@ -1035,12 +1035,36 @@ async def get_card_handler(callback: CallbackQuery):
     await callback.answer()
 
 
+async def scan_meme_channel() -> list:
+    """Сканируем канал и собираем все доступные ID сообщений с картинками."""
+    global meme_ids
+    if meme_ids:
+        return meme_ids
+
+    found_ids = []
+    for msg_id in range(1, 1000):
+        try:
+            msg = await bot.copy_message(
+                chat_id=MEMES_CHANNEL_ID,
+                from_chat_id=MEMES_CHANNEL_ID,
+                message_id=msg_id,
+            )
+            # Удаляем скопированное сообщение
+            await bot.delete_message(chat_id=MEMES_CHANNEL_ID, message_id=msg.message_id)
+            found_ids.append(msg_id)
+        except Exception:
+            continue
+
+    meme_ids = found_ids
+    logging.info(f"Найдено мемов в канале: {len(meme_ids)}")
+    return meme_ids
+
+
 @dp.callback_query(F.data == "get_meme")
 async def get_meme_handler(callback: CallbackQuery):
     user_id = callback.from_user.id
     today = str(date.today())
 
-    # Проверяем лимит на сегодня
     if user_id in meme_data and meme_data[user_id]["date"] == today:
         await callback.answer(
             "Ты уже смотрел мем сегодня! Возвращайся завтра 😄",
@@ -1052,36 +1076,38 @@ async def get_meme_handler(callback: CallbackQuery):
     await callback.message.answer("Ищу мем... 🔍")
 
     try:
-        # Получаем случайный мем из канала
-        # Перебираем message_id пока не найдём картинку
-        found = False
-        used_today = meme_data.get(user_id, {}).get("used_ids", [])
+        # Получаем список всех доступных мемов
+        available_ids = await scan_meme_channel()
 
-        for _ in range(50):
-            msg_id = random.randint(1, 500)
-            if msg_id in used_today:
-                continue
-            try:
-                await bot.copy_message(
-                    chat_id=callback.from_user.id,
-                    from_chat_id=MEMES_CHANNEL_ID,
-                    message_id=msg_id,
-                )
-                meme_data[user_id] = {
-                    "date": today,
-                    "used_ids": used_today + [msg_id],
-                }
-                found = True
-                break
-            except Exception:
-                continue
-
-        if not found:
+        if not available_ids:
             await callback.message.answer(
-                "Не нашёл мем 😢 Попробуй позже, грузовичок со смешнявками еще не приехал!",
+                "Мемов пока нет 😢 Добавь картинки в канал!",
                 reply_markup=get_main_keyboard(),
             )
             return
+
+        used_today = meme_data.get(user_id, {}).get("used_ids", [])
+        remaining = [mid for mid in available_ids if mid not in used_today]
+
+        if not remaining:
+            await callback.message.answer(
+                "Ты уже видел все мемы! Завтра будут новые 😄",
+                reply_markup=get_main_keyboard(),
+            )
+            return
+
+        msg_id = random.choice(remaining)
+
+        await bot.copy_message(
+            chat_id=callback.from_user.id,
+            from_chat_id=MEMES_CHANNEL_ID,
+            message_id=msg_id,
+        )
+
+        meme_data[user_id] = {
+            "date": today,
+            "used_ids": used_today + [msg_id],
+        }
 
         await callback.message.answer("Держи свой мем дня! 😂", reply_markup=get_main_keyboard())
 
