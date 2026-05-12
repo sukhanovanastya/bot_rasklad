@@ -19,14 +19,21 @@ load_dotenv()
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DONATE_URL = os.getenv("DONATE_URL")
+MEMES_CHANNEL_ID = int(os.getenv("MEMES_CHANNEL_ID"))
 
 logging.basicConfig(level=logging.INFO)
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Хранилище: {user_id: {"date": "2024-01-01", "used_interpretations": [0, 1]}}
+# Хранилище для карт: {user_id: {"date": "2024-01-01", ...}}
 user_data: dict = {}
+
+# Хранилище для мемов: {user_id: {"date": "2024-01-01", "used_ids": [123, 456]}}
+meme_data: dict = {}
+
+# Кэш ID сообщений из канала с мемами
+meme_ids: list = []
 
 CARDS = {
     "Шут": {
@@ -972,6 +979,7 @@ def get_main_keyboard():
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [InlineKeyboardButton(text="🃏 Получить карту дня", callback_data="get_card")],
+            [InlineKeyboardButton(text="😂 Мем дня", callback_data="get_meme")],
             [InlineKeyboardButton(text="🍩 Задонатить на пончик", url=DONATE_URL)],
         ]
     )
@@ -994,28 +1002,18 @@ async def get_card_handler(callback: CallbackQuery):
     today = str(date.today())
 
     if user_id in user_data and user_data[user_id]["date"] == today:
-        used = user_data[user_id]["used_interpretations"]
-        card_name = user_data[user_id]["card"]
-        position = user_data[user_id]["position"]
-        cards_list = CARDS[card_name]
-        interpretation_list = cards_list["upright"] if position == "upright" else cards_list["reversed"]
-
         await callback.answer(
             "Ты уже тянул карту сегодня! Возвращайся завтра 🌙",
             show_alert=True,
         )
         return
 
-    # Выбираем случайную карту и позицию
     card_name = random.choice(list(CARDS.keys()))
     position = random.choice(["upright", "reversed"])
     interpretations = CARDS[card_name][position]
-
-    # Выбираем случайную трактовку
     interpretation = random.choice(interpretations)
     interpretation_index = interpretations.index(interpretation)
 
-    # Сохраняем данные пользователя
     user_data[user_id] = {
         "date": today,
         "card": card_name,
@@ -1035,6 +1033,64 @@ async def get_card_handler(callback: CallbackQuery):
 
     await callback.message.answer(text, parse_mode="Markdown", reply_markup=get_main_keyboard())
     await callback.answer()
+
+
+@dp.callback_query(F.data == "get_meme")
+async def get_meme_handler(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    today = str(date.today())
+
+    # Проверяем лимит на сегодня
+    if user_id in meme_data and meme_data[user_id]["date"] == today:
+        await callback.answer(
+            "Ты уже смотрел мем сегодня! Возвращайся завтра 😄",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer()
+    await callback.message.answer("Ищу мем... 🔍")
+
+    try:
+        # Получаем случайный мем из канала
+        # Перебираем message_id пока не найдём картинку
+        found = False
+        used_today = meme_data.get(user_id, {}).get("used_ids", [])
+
+        for _ in range(50):
+            msg_id = random.randint(1, 500)
+            if msg_id in used_today:
+                continue
+            try:
+                await bot.copy_message(
+                    chat_id=callback.from_user.id,
+                    from_chat_id=MEMES_CHANNEL_ID,
+                    message_id=msg_id,
+                )
+                meme_data[user_id] = {
+                    "date": today,
+                    "used_ids": used_today + [msg_id],
+                }
+                found = True
+                break
+            except Exception:
+                continue
+
+        if not found:
+            await callback.message.answer(
+                "Не нашёл мем 😢 Попробуй позже или добавь больше мемов в канал!",
+                reply_markup=get_main_keyboard(),
+            )
+            return
+
+        await callback.message.answer("Держи свой мем дня! 😂", reply_markup=get_main_keyboard())
+
+    except Exception as e:
+        logging.error(f"Ошибка мема: {e}")
+        await callback.message.answer(
+            "Что-то пошло не так 😢 Попробуй позже.",
+            reply_markup=get_main_keyboard(),
+        )
 
 
 async def main():
