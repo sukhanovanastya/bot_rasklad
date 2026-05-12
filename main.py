@@ -1081,7 +1081,7 @@ async def get_meme_handler(callback: CallbackQuery):
 
         if not available_ids:
             await callback.message.answer(
-                "Мемов пока нет 😢 Добавь картинки в канал!",
+                "Мемов пока нет 😢 Грузовичок со смешнявками еще в пути!",
                 reply_markup=get_main_keyboard(),
             )
             return
