@@ -1078,7 +1078,7 @@ async def get_meme_handler(callback: CallbackQuery):
 
         if not found:
             await callback.message.answer(
-                "Не нашёл мем 😢 Попробуй позже или добавь больше мемов в канал!",
+                "Не нашёл мем 😢 Попробуй позже, грузовичок со смешнявками еще не приехал!",
                 reply_markup=get_main_keyboard(),
             )
             return
